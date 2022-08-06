@@ -28,11 +28,31 @@ import com.google.gson.stream.JsonWriter;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PcodeDataTypeManager;
+import ghidra.program.model.pcode.HighFunctionDBUtil;
+import ghidra.util.exception.DuplicateNameException;
+import ghidra.util.exception.InvalidInputException;
 
 public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
 	private static final String NAME = "name";
 	private static final String ENTRY = "entry";
+
+	private void autoCommitParameters(Program p, Function f){
+		PcodeDataTypeManager dtManager = new PcodeDataTypeManager(p);
+		HighFunction hf = new HighFunction( f, 
+										p.getLanguage(), 
+										p.getCompilerSpec(), 
+										dtManager);
+		HighFunctionDBUtil hfdb = new HighFunctionDBUtil();
+		try{
+			hfdb.commitParamsToDatabase(hf, true, f.getSignatureSource());
+		}
+		catch(DuplicateNameException | InvalidInputException e){
+			println(e.toString());
+		}
+	}
 
 	private JsonArray getAllVariables(Function f){
 		/* IMPORTANT NOTE
@@ -97,6 +117,16 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
 		//File outputFile = askFile("Please Select Output File", "Choose");
 		//JsonWriter jsonWriter = new JsonWriter(new FileWriter(outputFile));
+
+		Boolean autoCommitBool = true;
+		String autoCommitString = askString("Commit function parameters", 
+									"Would you like to commit function params before proceeding? [y/Y/]", 
+									"y");
+		if(autoCommitString.equals("y") || autoCommitString.equals("Y")){
+			println("Commiting parameters...");
+		}
+
+
 		String defaultFileName = "/tmp/" + currentProgram.getName() + "_functionMetadata.json";
 		String outputFile = askString("Output", "Please provide name of file for output:", defaultFileName);
 		JsonWriter jsonWriter = new JsonWriter(new FileWriter(outputFile));
@@ -107,6 +137,10 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		FunctionIterator iter = listing.getFunctions(true);
 		while (iter.hasNext() && !monitor.isCancelled()) {
 			Function f = iter.next();
+			if (autoCommitBool){;
+				println("Commit params for " + f.getName());
+				autoCommitParameters(currentProgram, f);
+			}
 
 			String name = f.getName();
 			Address entry = f.getEntryPoint();
