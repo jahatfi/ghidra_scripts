@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Adapted from ExportFunctionInfoScript.java
+ * Adapted from ExportFunctionInfoScript.java, inspired by 
+ * Christopher Robert's Firmware Slap
  */
 // List function names and verbose metadata to a file in JSON format
 //@category Functions
