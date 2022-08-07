@@ -43,8 +43,7 @@ import ghidra.program.model.pcode.HighSymbol;
 
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
-
-
+import ghidra.app.decompiler.ClangTokenGroup;
 
 import ghidra.util.task.TaskMonitor;
 
@@ -54,37 +53,27 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 	private static final String NAME = "name";
 	private static final String ENTRY = "entry";
 
-	private void autoCommitParameters(Program p, Function f, int timeout){
+	private void autoCommitParameters(DecompInterface ifc, Program p, Function f, int timeout){
 		/*
-		Student are not expected to do this, but included as bonus content.
-		Adapted from:
-		https://github.com/saruman9/ghidra_scripts/CommitParamsReturn.java
-		under Apache 2.0 license
+		Students are not expected to do this, but included as bonus content.
+		Adapted from the Ghidra API Docs
 		*/
-		DecompInterface ifc = new DecompInterface();				
-		printf("Trying to decompile %s for commiting of parameters\n", f.getName());
-		DecompileResults decompileResults = ifc.decompileFunction(f, 10, TaskMonitor.DUMMY);
-		printf("Decomp completed? %s\n", decompileResults.decompileCompleted());	
-		if (decompileResults == null){
-			printf("decompileResults is null, returning\n");
+	
+		// Make calls to the decompiler:
+		DecompileResults res = ifc.decompileFunction(f,0, null);
+		
+		// Check for error conditions
+		if (!res.decompileCompleted()) {
+			println(res.getErrorMessage());
 			return;
-		} 
-		printf("DCR: %s\n", decompileResults.toString());
-
-		printf("CodeMarkup: %s\n", decompileResults.getCCodeMarkup());
-		HighFunction highFunction = decompileResults.getHighFunction();
-		if(highFunction == null){
-			printf("highFunction is null.\n");
-			printf("Error Message: %s\n", decompileResults.getErrorMessage());
-
-			printf("Failed to start? %s\n", decompileResults.failedToStart());
-			printf("Timedout?  %s\n", decompileResults.isTimedOut());
-			printf("Cancelled %s\n", decompileResults.isCancelled());
-
-			printf("returning\n");
-			return;
-		} 
-		FunctionPrototype functionPrototype = highFunction.getFunctionPrototype();	
+		}
+		
+		// Make use of results
+		// Get C code
+		ClangTokenGroup tokgroup = res.getCCodeMarkup();
+		// Get the function object/syntax tree
+		HighFunction hfunc = res.getHighFunction();
+		FunctionPrototype functionPrototype = hfunc.getFunctionPrototype();	
 
 		printf("%s() signature: %s\n", f.getName(), functionPrototype.getReturnType().toString());
 		for (int i = 0; i < functionPrototype.getNumParams(); i++) {
@@ -94,8 +83,8 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
 
 		try{
-			HighFunctionDBUtil.commitReturnToDatabase(highFunction, SourceType.ANALYSIS);
-			HighFunctionDBUtil.commitParamsToDatabase(highFunction, true, SourceType.ANALYSIS);		
+			HighFunctionDBUtil.commitReturnToDatabase(hfunc, SourceType.ANALYSIS);
+			HighFunctionDBUtil.commitParamsToDatabase(hfunc, true, SourceType.ANALYSIS);		
 		}
 		catch(DuplicateNameException | InvalidInputException e){
 			println(e.toString());
@@ -105,11 +94,12 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 	private JsonArray getAllVariables(Function f){
 		/* IMPORTANT NOTE
 		This function will return 0 parameters for non-libraries functions
-		unless the function's signature has been "commited."
+		unless the function's signature has been "commited".
 		To do this in the GUI, navigate to the function, open decompiler view,
 		right-click, and select "Commit Params/Return" or use hotkey "P"
-		For help on doing this programmatically, see the Ghidra API docs on
-		the HighFunctionDBUtil class
+		This script will also do this automatically via the function above if
+		the user enters "y" at the first prompt.  
+		This is also the scripts default behavior.
 		*/
 		
 		JsonArray ja = new JsonArray();
@@ -160,6 +150,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 	public void run() throws Exception {
 
 		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+		DecompInterface ifc = null;
 
 		//File outputFile = askFile("Please Select Output File", "Choose");
 		//JsonWriter jsonWriter = new JsonWriter(new FileWriter(outputFile));
@@ -167,11 +158,20 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		Boolean autoCommitBool = true;
 		int timeout = 30;
 		String autoCommitString = askString("Commit function parameters",
-									"Would you like to commit function parameter and returns? This is recommended. [y/Y/]",
+									"Would you like to commit function parameter value and return? This is recommended, otherwise the results of this script may not match the decompiled view in the GUI. [y/Y/]",
 									"y");
 		if(autoCommitString.equals("y") || autoCommitString.equals("Y")){
 			println("Will commit commit function parameter and returns.");
+			ifc = new DecompInterface();			
+			// Setup any options or other initialization
+			//ifc.setOptions(xmlOptions); // Inform interface of global options
+			// ifc.toggleSyntaxTree(false);  // Don't produce syntax trees
+			// ifc.toggleCCode(false);       // Don't produce C code
+			// ifc.setSimplificationStyle("normalize"); // Alternate analysis style
 			
+			// Setup up the actual decompiler process for a
+			// particular program, using all the above initialization
+			ifc.openProgram(currentProgram);			
 		}
 
 
@@ -188,7 +188,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 			Function f = iter.next();
 			if (autoCommitBool){;
 				printf("Commit params for %s\n", f.getName());
-				autoCommitParameters(currentProgram, f, timeout);
+				autoCommitParameters(ifc, currentProgram, f, timeout);
 			}
 
 			String name = f.getName();
