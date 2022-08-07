@@ -19,7 +19,14 @@
 // List function names and verbose metadata to a file in JSON format
 //@category Functions
 
-
+// Headless invocation:
+/*
+~/Downloads/ghidra_10.1.4_PUBLIC/support/analyzeHeadless /PATH/TO/GHIDR/PROJECT GHIDRA_PROJECT 
+-process layers.bin
+-postScript  ExportFunctionInfoScriptVerbose.java 
+-scriptPath /PATH/TO/THIS/SCRIPT 
+-readOnly 
+*/
 
 import java.io.File;
 import java.io.FileWriter;
@@ -30,8 +37,12 @@ import com.google.gson.stream.JsonWriter;
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.decompiler.ClangTokenGroup;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.block.BasicBlockModel;
+import ghidra.program.model.block.SimpleBlockModel;
+import ghidra.program.model.block.SimpleBlockIterator;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeDataTypeManager;
@@ -41,12 +52,10 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.pcode.HighSymbol;
 
+import ghidra.util.task.TaskMonitor;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
-import ghidra.app.decompiler.ClangTokenGroup;
-
-import ghidra.util.task.TaskMonitor;
-
+import ghidra.util.exception.CancelledException;
 
 public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
@@ -89,6 +98,24 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		catch(DuplicateNameException | InvalidInputException e){
 			println(e.toString());
 		}
+	}
+
+	private int getNumBlocksInFunction(Function f, SimpleBlockModel sbm, TaskMonitor monitor){
+		// Returns # of code blocks in a function or -1 on error
+		int numBlocks = 0;
+
+		try{
+			SimpleBlockIterator sbi = new SimpleBlockIterator(sbm, f.getBody(), monitor);
+		
+			while(sbi.hasNext()){
+				sbi.next();
+				numBlocks++;
+			}
+		}
+		catch(CancelledException ignore){
+			numBlocks = -1;
+		}
+		return numBlocks;
 	}
 
 	private JsonArray getAllVariables(Function f){
@@ -183,6 +210,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
 		Listing listing = currentProgram.getListing();
 		FunctionIterator iter = listing.getFunctions(true);
+		SimpleBlockModel sbm = new SimpleBlockModel(currentProgram);
 		while (iter.hasNext() && !monitor.isCancelled()) {
 			printf("-------------------------------------\n");
 			Function f = iter.next();
@@ -207,7 +235,8 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 			json.addProperty("callingFunctions", f.getCallingFunctions(null).toString());
 			json.addProperty("calledFunctions", f.getCalledFunctions(null).toString());
 			json.addProperty("signature", f.getSignature().toString());
-			json.addProperty("string", f.toString());
+			// The line below is bonus material for classroom instruction:
+			json.addProperty("numberOfCodeBlocks", getNumBlocksInFunction(f, sbm, monitor));
 
 			// Get metadata that is returned as an array
 			// I wrote helper functions for these
