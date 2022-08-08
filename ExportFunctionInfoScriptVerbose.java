@@ -41,6 +41,8 @@ import ghidra.app.decompiler.ClangTokenGroup;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.block.BasicBlockModel;
+import ghidra.program.model.block.CodeBlock;
+import ghidra.program.model.block.CodeBlockImpl;
 import ghidra.program.model.block.SimpleBlockModel;
 import ghidra.program.model.block.SimpleBlockIterator;
 import ghidra.program.model.listing.*;
@@ -61,7 +63,9 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 
 	private static final String NAME = "name";
 	private static final String ENTRY = "entry";
+	private static CodeBlock cb = null;
 
+	//==========================================================================
 	private void autoCommitParameters(DecompInterface ifc, Program p, Function f, int timeout){
 		/*
 		Students are not expected to do this, but included as bonus content.
@@ -87,7 +91,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		printf("%s() signature: %s\n", f.getName(), functionPrototype.getReturnType().toString());
 		for (int i = 0; i < functionPrototype.getNumParams(); i++) {
 			HighSymbol parameter = functionPrototype.getParam(i);
-			println(parameter.getDataType().toString() + " " + parameter.getName());
+			printf("%s\n",parameter.getDataType().toString() + " " + parameter.getName());
 		}
 
 
@@ -99,9 +103,11 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 			println(e.toString());
 		}
 	}
-
+	//==========================================================================
 	private int getNumBlocksInFunction(Function f, SimpleBlockModel sbm, TaskMonitor monitor){
 		// Returns # of code blocks in a function or -1 on error
+		// It's worth noting the initialization and use of the 
+		// Block iterators significantly increase the runtime		
 		int numBlocks = 0;
 
 		try{
@@ -117,7 +123,45 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		}
 		return numBlocks;
 	}
+	//==========================================================================
+	int getNumBlocksInFunctionv2(Function f, SimpleBlockIterator sbi){
+		int numberOfCodeBlocks = 0;
+		//printf("-------------------------------------\n");
+		//printf("%s %s\n", f.getName(), f.getEntryPoint().toString() );
+		try{
+			while(sbi.hasNext()){
+				//printf("cb: %s-%s\n", cb.getMinAddress().toString(), cb.getMaxAddress().toString());
 
+				if (cb == null){
+					cb = sbi.next();
+				}
+				if (f.getBody().contains(cb.getMinAddress(), cb.getMaxAddress())){
+					numberOfCodeBlocks++;
+					cb = sbi.next();
+				}
+				else if (f.getBody().getMinAddress().compareTo(cb.getMaxAddress()) > 0){
+					cb = sbi.next();
+				}
+				else{
+					break;
+				} 
+				//printf("cb: %s-%s\n", cb.getMinAddress().toString(), cb.getMaxAddress().toString());
+			}
+
+			if(!sbi.hasNext() && cb != null){
+				if (f.getBody().contains(cb.getMinAddress(), cb.getMaxAddress())){
+					numberOfCodeBlocks++;		
+					cb = null;
+				}		
+			}
+		}
+		catch(CancelledException ignore){
+			numberOfCodeBlocks = -1;
+		}
+		return numberOfCodeBlocks;
+	}
+			
+	//==========================================================================
 	private JsonArray getAllVariables(Function f){
 		/* IMPORTANT NOTE
 		This function will return 0 parameters for non-libraries functions
@@ -148,8 +192,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		}
 		return ja;
 	}
-
-
+	//==========================================================================
 	private JsonArray getParameters(Function f){
 		
 		JsonArray ja = new JsonArray();
@@ -172,7 +215,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		}
 		return ja;
 	}	
-
+	//==========================================================================
 	@Override
 	public void run() throws Exception {
 
@@ -188,7 +231,7 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 									"Would you like to commit function parameter value and return? This is recommended, otherwise the results of this script may not match the decompiled view in the GUI. [y/Y/]",
 									"y");
 		if(autoCommitString.equals("y") || autoCommitString.equals("Y")){
-			println("Will commit commit function parameter and returns.");
+			printf("Will commit commit function parameter and returns.\n");
 			ifc = new DecompInterface();			
 			// Setup any options or other initialization
 			//ifc.setOptions(xmlOptions); // Inform interface of global options
@@ -211,11 +254,20 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		Listing listing = currentProgram.getListing();
 		FunctionIterator iter = listing.getFunctions(true);
 		SimpleBlockModel sbm = new SimpleBlockModel(currentProgram);
+
+		SimpleBlockIterator sbi = new SimpleBlockIterator(sbm, monitor);
+		cb = sbi.next();
+		int numberOfCodeBlocks = 0;
+		int numberOfCodeBlocksv2 = 0;
+
 		while (iter.hasNext() && !monitor.isCancelled()) {
 			printf("-------------------------------------\n");
+
+			numberOfCodeBlocks = 0;
 			Function f = iter.next();
+
 			if (autoCommitBool){;
-				printf("Commit params for %s\n", f.getName());
+				//printf("Commit params for %s\n", f.getName());
 				autoCommitParameters(ifc, currentProgram, f, timeout);
 			}
 
@@ -235,8 +287,19 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 			json.addProperty("callingFunctions", f.getCallingFunctions(null).toString());
 			json.addProperty("calledFunctions", f.getCalledFunctions(null).toString());
 			json.addProperty("signature", f.getSignature().toString());
-			// The line below is bonus material for classroom instruction:
-			json.addProperty("numberOfCodeBlocks", getNumBlocksInFunction(f, sbm, monitor));
+
+			// The line below is bonus material for classroom instruction
+			// It's worth noting the initialization and use of the 
+			// Block iterators significantly increase the runtime
+			numberOfCodeBlocks = getNumBlocksInFunction(f, sbm, monitor);
+			//numberOfCodeBlocksv2 = getNumBlocksInFunctionv2(f, sbi);
+			json.addProperty("numberOfCodeBlocks", numberOfCodeBlocks);
+			//json.addProperty("numberOfCodeBlocksv2", numberOfCodeBlocksv2);
+			if (numberOfCodeBlocks != numberOfCodeBlocksv2){
+				printf("%s\n", f.getName());
+				printf("%s %d != %d\n", f.getName(), numberOfCodeBlocks, numberOfCodeBlocksv2);
+				printf(f.getName());
+			} 
 
 			// Get metadata that is returned as an array
 			// I wrote helper functions for these
@@ -249,6 +312,6 @@ public class ExportFunctionInfoScriptVerbose extends GhidraScript {
 		jsonWriter.endArray();
 		jsonWriter.close();
 
-		println("Wrote function metadata to " + outputFile);	
+		printf("Wrote function metadata to %s\n", outputFile);	
 	}
 }
